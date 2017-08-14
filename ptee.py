@@ -7,11 +7,16 @@ import sys
 import textwrap
 import threading
 
+def print_error(e):
+    print('ptee: {}'.format(str(e)), file=sys.stderr)
+
 
 def reader(input, q: queue.Queue):
     try:
         for line in input:
             q.put(line)
+    except IOError as e:
+        print_error(e)
     finally:
         # send shutdown message to writer thread.
         q.put(None)
@@ -104,8 +109,7 @@ def main():
         try:
             files.append(open(f, mode))
         except IOError as e:
-            print('ptee: {}'.format(str(e)), file=sys.stderr)
-            exit(1)
+            print_error(e)
 
     input = sys.stdin
     outputs = files + [sys.stdout]
@@ -123,8 +127,7 @@ def main():
         try:
             f.close()
         except IOError as e:
-            print('ptee: {}'.format(str(e)), file=sys.stderr)
-            exit(1)
+            print_error(e)
     return 0
 
 
