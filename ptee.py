@@ -38,12 +38,11 @@ def writer(outputs: list, q: queue.Queue, prefix: str):
                 for f in outputs:
                     f.write(data)
 
-                try:
-                    line = q.get_nowait()
-                    if line is None:
-                        return
-                except queue.Empty:
-                    break
+                line = q.get_nowait()  # might be raised queue.Empty
+                if line is None:
+                    return
+        except queue.Empty:
+            continue
         finally:
             # Release exclusive lock on all files.
             for f in outputs:
