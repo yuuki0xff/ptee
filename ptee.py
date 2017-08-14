@@ -41,7 +41,11 @@ def writer(outputs: list, q: queue.Queue, prefix: str):
             # will be blocked for a long time.
             while True:
                 assert line is not None
-                data = prefix + line
+
+                data = line
+                if prefix:
+                    data = prefix + line
+
                 for f in outputs:
                     f.write(data)
 
