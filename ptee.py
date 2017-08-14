@@ -7,6 +7,14 @@ import sys
 import textwrap
 import threading
 
+ERROR_MODES = [
+    'warn',
+    'warn-nopipe',
+    'exit',
+    'exit-nopipe',
+]
+
+
 def print_error(e):
     print('ptee: {}'.format(str(e)), file=sys.stderr)
 
@@ -22,7 +30,9 @@ def reader(input, q: queue.Queue):
         q.put(None)
 
 
-def writer(outputs: list, q: queue.Queue, prefix: str):
+def writer(outputs: list, q: queue.Queue, prefix: str, output_error: str):
+    is_broken = [False for _ in outputs]
+
     while True:
         # Wait for receiving a line.
         line = q.get()
@@ -31,10 +41,17 @@ def writer(outputs: list, q: queue.Queue, prefix: str):
 
         try:
             # Get exclusive lock on all files.
-            for f in outputs:
-                fcntl.lockf(f.fileno(), fcntl.LOCK_EX)
-                if f.seekable():
-                    f.seek(os.SEEK_END)
+            for i, f in enumerate(outputs):
+                if not is_broken[i]:
+                    try:
+                        fcntl.lockf(f.fileno(), fcntl.LOCK_EX)
+                        if f.seekable():
+                            f.seek(os.SEEK_END)
+                    except:
+                        is_broken[i] = True
+                        if all(is_broken):
+                            return 1  # TODO exception
+
 
             # Write to all outputs until q is empty. If sender's so very fast,
             # this task will be taking a long time, and another "ptee" processes
@@ -46,8 +63,14 @@ def writer(outputs: list, q: queue.Queue, prefix: str):
                 if prefix:
                     data = prefix + line
 
-                for f in outputs:
-                    f.write(data)
+                for i, f in enumerate(outputs):
+                    if not is_broken[i]:
+                        try:
+                            f.write(data)
+                        except:
+                            is_broken[i] = True
+                            if all(is_broken):
+                                return 1  # TODO exception
 
                 line = q.get_nowait()  # might be raised queue.Empty
                 if line is None:
@@ -56,9 +79,18 @@ def writer(outputs: list, q: queue.Queue, prefix: str):
             continue
         finally:
             # Release exclusive lock on all files.
-            for f in outputs:
-                f.flush()
-                fcntl.lockf(f.fileno(), fcntl.LOCK_UN)
+            for i, f in enumerate(outputs):
+                try:
+                    f.flush()
+                    fcntl.lockf(f.fileno(), fcntl.LOCK_UN)
+                except Exception as e:
+                    if not is_broken[i]:
+                        print_error(e)
+                        is_broken[i] = True
+
+                    print(is_broken, file=sys.stderr)
+                    if all(is_broken):
+                        return 1  # TODO exception
 
 
 def parse_args():
@@ -97,6 +129,10 @@ def parse_args():
                    default=100000,
                    help='change buffer size (default 100000 lines)',
                    metavar='LINES')
+    p.add_argument('--output-error',
+                   default='warn-nopipe',
+                   choices=ERROR_MODES,
+                   help='set behavior on write error')
     p.add_argument('file',
                    nargs='*',
                    metavar='FILE')
@@ -121,7 +157,7 @@ def main():
 
     r = threading.Thread(target=reader, args=(input, q))
     r.start()
-    w = threading.Thread(target=writer, args=(outputs, q, args.prefix))
+    w = threading.Thread(target=writer, args=(outputs, q, args.prefix, args.output_error))
     w.start()
 
     r.join()
