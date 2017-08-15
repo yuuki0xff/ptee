@@ -6,6 +6,7 @@ import queue
 import sys
 import textwrap
 import threading
+import traceback
 
 ERROR_MODES = [
     'warn',
@@ -15,82 +16,130 @@ ERROR_MODES = [
 ]
 
 
+class StopWorker(Exception): pass
+
 def print_error(e):
     print('ptee: {}'.format(str(e)), file=sys.stderr)
 
 
-def reader(input, q: queue.Queue):
-    try:
-        for line in input:
-            q.put(line)
-    except IOError as e:
-        print_error(e)
-    finally:
-        # send shutdown message to writer thread.
-        q.put(None)
+class ReadWorker(threading.Thread):
+    def __init__(self, input_, q: queue.Queue):
+        super().__init__()
+        self.input_ = input_
+        self.q = q
+        self.return_val = None
 
-
-def writer(outputs: list, q: queue.Queue, prefix: str, output_error: str):
-    is_broken = [False for _ in outputs]
-
-    while True:
-        # Wait for receiving a line.
-        line = q.get()
-        if line is None:
-            return
-
+    def run(self):
         try:
-            # Get exclusive lock on all files.
-            for i, f in enumerate(outputs):
-                if not is_broken[i]:
-                    try:
-                        fcntl.lockf(f.fileno(), fcntl.LOCK_EX)
-                        if f.seekable():
-                            f.seek(os.SEEK_END)
-                    except:
-                        is_broken[i] = True
-                        if all(is_broken):
-                            return 1  # TODO exception
+            for line in self.input_:
+                self.q.put(line)
+        except OSError as e:
+            print_error(e)
+            self.return_val = e
+        except SystemExit:
+            return
+        except:
+            self.return_val = traceback.format_exc()
+        finally:
+            # send shutdown message to writer thread.
+            self.q.put(None)
 
 
-            # Write to all outputs until q is empty. If sender's so very fast,
-            # this task will be taking a long time, and another "ptee" processes
-            # will be blocked for a long time.
+class WriteWorker(threading.Thread):
+    def __init__(self, outputs: list, q: queue.Queue, prefix: str, error_mode: str):
+        super().__init__()
+        self.outputs = outputs
+        self.q = q
+        self.prefix = prefix
+        self.error_mode = error_mode
+        self.is_broken = [False for _ in outputs]
+        self.return_val = None
+
+    def run(self):
+        try:
             while True:
-                assert line is not None
-
-                data = line
-                if prefix:
-                    data = prefix + line
-
-                for i, f in enumerate(outputs):
-                    if not is_broken[i]:
-                        try:
-                            f.write(data)
-                        except:
-                            is_broken[i] = True
-                            if all(is_broken):
-                                return 1  # TODO exception
-
-                line = q.get_nowait()  # might be raised queue.Empty
+                # Wait for receiving a line.
+                line = self.q.get()
                 if line is None:
                     return
-        except queue.Empty:
-            continue
-        finally:
-            # Release exclusive lock on all files.
-            for i, f in enumerate(outputs):
-                try:
-                    f.flush()
-                    fcntl.lockf(f.fileno(), fcntl.LOCK_UN)
-                except Exception as e:
-                    if not is_broken[i]:
-                        print_error(e)
-                        is_broken[i] = True
 
-                    print(is_broken, file=sys.stderr)
-                    if all(is_broken):
-                        return 1  # TODO exception
+                try:
+                    self.lock_all()
+
+                    # Write to all outputs until q is empty. If sender's so very fast,
+                    # this task will be taking a long time, and another "ptee" processes
+                    # will be blocked for a long time.
+                    while True:
+                        assert line is not None
+                        self.write_all(line)
+
+                        line = self.q.get_nowait()  # might be raised queue.Empty
+                        if line is None:
+                            return
+                except queue.Empty:
+                    continue
+                finally:
+                    self.unlock_all()
+        except StopWorker as e:
+            self.return_val = e
+        except SystemExit:
+            return
+        except:
+            self.return_val = traceback.format_exc()
+        finally:
+            self.close_all()
+
+    def on_error(self, i: int, e: BaseException):
+        is_pipe = self.outputs[i] == sys.stdout
+
+        if self.error_mode == 'warn' or (self.error_mode == 'warn-nopipe' and not is_pipe):
+            print_error(e)
+        elif self.error_mode.startswith('exit'):
+            raise StopWorker(e)
+
+        self.is_broken[i] = True
+        if all(self.is_broken):
+            raise StopWorker('all outputs is broken')
+
+    def lock_all(self):
+        "Get exclusive lock on all files."
+        for i, f in enumerate(self.outputs):
+            if self.is_broken[i]: continue
+            try:
+                fcntl.lockf(f.fileno(), fcntl.LOCK_EX)
+                if f.seekable():
+                    f.seek(os.SEEK_END)
+            except OSError as e:
+                self.on_error(i, e)
+
+    def write_all(self, line: str):
+        for i, f in enumerate(self.outputs):
+            if self.is_broken[i]: continue
+            try:
+                if self.prefix:
+                    f.write(self.prefix)
+                f.write(line)
+            except OSError as e:
+                self.on_error(i, e)
+
+    def unlock_all(self):
+        "Release exclusive lock on all files."
+        for i, f in enumerate(self.outputs):
+            if self.is_broken[i]: continue
+            try:
+                f.flush()
+                fcntl.lockf(f.fileno(), fcntl.LOCK_UN)
+            except OSError as e:
+                self.on_error(i, e)
+
+    def close_all(self):
+        "Release exclusive lock on all files."
+        for i, f in enumerate(self.outputs):
+            if self.is_broken[i]: continue
+            try:
+                f.close()
+            except OSError as e:
+                self.on_error(i, e)
 
 
 def parse_args():
@@ -155,20 +204,15 @@ def main():
     outputs = files + [sys.stdout]
     q = queue.Queue(maxsize=args.buffer_size)
 
-    r = threading.Thread(target=reader, args=(input, q))
+    r = ReadWorker(input, q)
     r.start()
-    w = threading.Thread(target=writer, args=(outputs, q, args.prefix, args.output_error))
+    w = WriteWorker(outputs, q, args.prefix, args.output_error)
     w.start()
 
     r.join()
-    w.join()
+    w.join()  # all files will be closed.
 
-    for f in files:
-        try:
-            f.close()
-        except IOError as e:
-            print_error(e)
-    return 0
+    return (r.return_val, w.return_val) != (None, None)
 
 
 if __name__ == '__main__':
