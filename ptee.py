@@ -194,6 +194,7 @@ def main():
         mode = 'a'
     files = []
     for f in args.file:
+        if f in ['/dev/null', '/dev/zero']: continue
         try:
             files.append(open(f, mode))
         except IOError as e:
