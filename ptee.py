@@ -206,7 +206,7 @@ def parse_args(argv):
 def main(argv=None):
     return run(parse_args(argv))
 
-def run(args):
+def run(args, use_signal=True):
     mode = 'w'
     if args.append:
         mode = 'a'
@@ -224,11 +224,12 @@ def run(args):
         outputs = files + [sys.stdout]
     q = queue.Queue(maxsize=args.buffer_size)
 
-    do_exit = lambda signum, frame: exit(1)
-    signal.signal(signal.SIGTERM, do_exit)
-    signal.signal(signal.SIGINT, do_exit)
-    signal.signal(signal.SIGHUP, do_exit)
-    signal.signal(signal.SIGQUIT, do_exit)
+    if use_signal:
+        do_exit = lambda signum, frame: exit(1)
+        signal.signal(signal.SIGTERM, do_exit)
+        signal.signal(signal.SIGINT, do_exit)
+        signal.signal(signal.SIGHUP, do_exit)
+        signal.signal(signal.SIGQUIT, do_exit)
 
     r = ReadWorker(input, q)
     r.setDaemon(True)
