@@ -180,7 +180,8 @@ def parse_args():
     p.add_argument('--output-error',
                    default='warn-nopipe',
                    choices=ERROR_MODES,
-                   help='set behavior on write error')
+                   help='set behavior on write error',
+                   metavar='MODE')
     p.add_argument('file',
                    nargs='*',
                    metavar='FILE')
