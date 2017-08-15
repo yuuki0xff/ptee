@@ -3,6 +3,7 @@ import argparse
 import fcntl
 import os
 import queue
+import signal
 import sys
 import textwrap
 import threading
@@ -210,13 +211,22 @@ def main():
         outputs = files + [sys.stdout]
     q = queue.Queue(maxsize=args.buffer_size)
 
+    do_exit = lambda signum, frame: exit(1)
+    signal.signal(signal.SIGTERM, do_exit)
+    signal.signal(signal.SIGINT, do_exit)
+    signal.signal(signal.SIGHUP, do_exit)
+    signal.signal(signal.SIGQUIT, do_exit)
+
     r = ReadWorker(input, q)
+    r.setDaemon(True)
     r.start()
     w = WriteWorker(outputs, q, args.prefix, args.output_error)
     w.start()
 
-    r.join()
     w.join()  # all files will be closed.
+    # *MUST NOT* call r.join().
+    # Because if w worker is dead before stdin terminated and q is full,
+    # r.join() might not be return forever.
 
     return (r.return_val, w.return_val) != (None, None)
 
