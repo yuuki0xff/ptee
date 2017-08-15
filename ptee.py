@@ -147,10 +147,21 @@ def parse_args():
     p = argparse.ArgumentParser(
         description='Parallelly writable tee command',
         epilog=textwrap.dedent('''
-            example:
-                $ rsync -av ... |& ptee --prefix='server1: ' --append rsync.log &
-                $ rsync -av ... |& ptee --prefix='server2: ' --append rsync.log &
+            MODE:
+                warn         dispaly error message and continue writing. 
+                warn-nopipe  display error message and continue writing, but ignore errors on pipe.
+                exit         exit on error.
+                exit-nopipe  exit on error, but ignore errors on pipe.
+                
+            Example:
+                $ rsync -av ... |& ptee -p 'server1: ' -a -n rsync.log &
+                $ rsync -av ... |& ptee -p 'server2: '     >>rsync.log &  # it's tricky, but work correctly.
                 $ wait
+                
+                ### ptee prevent that the terminal to be confused by parallel execution tasks.
+                $ ... | xargs -P8 sh -c 'echo "$@" |& ptee --prefix=$$: ' --
+                ### more easy by using an "-E" argument.
+                $ ... | xargs -P8 -i'{}' ptee -E echo '{}'
         '''),
         formatter_class=argparse.RawTextHelpFormatter,
     )
@@ -181,7 +192,7 @@ def parse_args():
     p.add_argument('--output-error',
                    default='warn-nopipe',
                    choices=ERROR_MODES,
-                   help='set behavior on write error',
+                   help='set behavior on write error (default warn-nopipe)',
                    metavar='MODE')
     p.add_argument('-n', '--no-stdout',
                    action='store_true',
