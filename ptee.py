@@ -143,7 +143,7 @@ class WriteWorker(threading.Thread):
                 self.on_error(i, e)
 
 
-def parse_args():
+def parse_args(argv):
     p = argparse.ArgumentParser(
         description='Parallelly writable tee command',
         epilog=textwrap.dedent('''
@@ -200,11 +200,13 @@ def parse_args():
     p.add_argument('file',
                    nargs='*',
                    metavar='FILE')
-    return p.parse_args()
+    return p.parse_args(argv)
 
 
-def main():
-    args = parse_args()
+def main(argv=None):
+    return run(parse_args(argv))
+
+def run(args):
     mode = 'w'
     if args.append:
         mode = 'a'
