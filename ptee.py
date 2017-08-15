@@ -201,7 +201,7 @@ def main():
         if f in ['/dev/null', '/dev/zero']: continue
         try:
             files.append(open(f, mode))
-        except IOError as e:
+        except OSError as e:
             print_error(e)
 
     input = sys.stdin
