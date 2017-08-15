@@ -171,7 +171,6 @@ def parse_args():
                    action='store_true',
                    help='append to the files')
     p.add_argument('-p', '--prefix',
-                   nargs=1,
                    help='add prefix to each lines')
     p.add_argument('-b', '--buffer-size',
                    type=int,
