@@ -182,6 +182,9 @@ def parse_args():
                    choices=ERROR_MODES,
                    help='set behavior on write error',
                    metavar='MODE')
+    p.add_argument('-n', '--no-stdout',
+                   action='store_true',
+                   help='do not writing to stdout')
     p.add_argument('file',
                    nargs='*',
                    metavar='FILE')
@@ -202,7 +205,9 @@ def main():
             print_error(e)
 
     input = sys.stdin
-    outputs = files + [sys.stdout]
+    outputs = files
+    if not args.no_stdout:
+        outputs = files + [sys.stdout]
     q = queue.Queue(maxsize=args.buffer_size)
 
     r = ReadWorker(input, q)
