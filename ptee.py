@@ -94,7 +94,7 @@ class WriteWorker(threading.Thread):
 
         if self.error_mode == 'warn' or (self.error_mode == 'warn-nopipe' and not is_pipe):
             print_error(e)
-        elif self.error_mode.startswith('exit'):
+        elif self.error_mode == 'exit' or (self.error_mode == 'exit-nopipe' and not is_pipe):
             raise StopWorker(e)
 
         self.is_broken[i] = True
