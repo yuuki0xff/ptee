@@ -109,7 +109,7 @@ class WriteWorker(threading.Thread):
             try:
                 fcntl.lockf(f.fileno(), fcntl.LOCK_EX)
                 if f.seekable():
-                    f.seek(os.SEEK_END)
+                    f.seek(0, os.SEEK_END)
             except OSError as e:
                 self.on_error(i, e)
 
