@@ -34,13 +34,13 @@ def start_ptee(args, input_fd):
         argv += ['--prefix', args.prefix]
 
     try:
-        import ptee
+        from ptee import ptee_cmd
         mpargv = argv[1:]  # exclude exe file name
 
         def wrapper():
             sys.stdin = os.fdopen(input_fd)
-            mpargs = ptee.parse_args(mpargv)
-            ptee.run(args=mpargs, use_signal=False)
+            mpargs = ptee_cmd.parse_args(mpargv)
+            ptee_cmd.run(args=mpargs, use_signal=False)
 
         p = threading.Thread(target=wrapper)
         p.start()
